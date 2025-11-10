@@ -200,7 +200,13 @@ if [[ ! -d "$SPEC_CPU_DIR" ]]; then
     exit 1
 fi
 
-timestamp=$(date +"%Y%m%d-%H%M%S")
+# Use shared timestamp from parent process if available, otherwise generate new one
+if [[ -n "$SHARED_TIMESTAMP" ]]; then
+    timestamp=$(echo "$SHARED_TIMESTAMP" | tr '_' '-')  # Convert format from run_all.sh
+else
+    timestamp=$(date +"%Y%m%d-%H%M%S")
+fi
+
 # Use proper naming based on actual run mode, not just DPF on/off
 if [[ "$BASELINE_MODE" == true ]]; then
     # Standard mode (DPF disabled) - use mode-specific suffix
@@ -334,6 +340,8 @@ fi
 
 #### 7. Helper Functions ####################################################
 
+
+
 # Simplified config modification for benchmarks
 modify_config() {
     if [[ "$BASELINE_MODE" == false ]]; then
@@ -410,8 +418,7 @@ generate_core_range() {
     fi
 }
 
-#### 8. Benchmark-Specific Setup Functions #################################
-#### 9. Main Execution Logic ################################################
+#### 8. Main Execution Logic ################################################
 core_range=$(generate_core_range) || exit 1
 
 # Set CPU performance settings
@@ -485,85 +492,6 @@ run_benchmark() {
         # Set binary name for command execution
         binary_name=$(basename "$full_binary_path")
 
-        # Enhanced benchmark input file handling - simplified
-        handle_benchmark_inputs() {
-            [[ "$VERBOSE" == true ]] && echo "Validating input files for benchmark: $benchmark_name..."
-            
-            # Set input directory path
-            input_dir="${commands_dir}/${benchmark_num}.${benchmark_name}_s/data/refspeed/input"
-            
-            # Validate input directory exists
-            if [[ ! -d "$input_dir" ]]; then
-                echo "ERROR: Input directory not found: $input_dir" | tee -a "${dir}/error.log"
-                echo "Please ensure SPEC CPU2017 is properly installed with all benchmark data." | tee -a "${dir}/error.log"
-                return 1
-            fi
-            
-            # Basic input file validation - check that essential files exist in SPEC directory
-            case "$benchmark_name" in
-                "perlbench")
-                    essential_files=("checkspam.pl" "splitmail.pl" "diffmail.pl")
-                    ;;
-                "gcc")
-                    essential_files=("gcc-pp.c" "scilab.c" "t1.c")
-                    ;;
-                "mcf")
-                    essential_files=("inp.in")
-                    ;;
-                "omnetpp")
-                    essential_files=("omnetpp.ini")
-                    ;;
-                "xalancbmk")
-                    essential_files=("allbooks.xml" "xalanc.xsl")
-                    ;;
-                "x264")
-                    essential_files=("BuckBunny.yuv")
-                    ;;
-                "deepsjeng")
-                    essential_files=("ref.txt")
-                    ;;
-                "leela")
-                    essential_files=("ref.sgf")
-                    ;;
-                "exchange2")
-                    essential_files=() # No input files required
-                    ;;
-                "xz")
-                    essential_files=("cpu2006docs.tar.xz")
-                    ;;
-                *)
-                    echo "WARNING: Unknown benchmark: $benchmark_name" | tee -a "${dir}/error.log"
-                    essential_files=()
-                    ;;
-            esac
-            
-            # Check for missing essential files and report clearly
-            missing_files=()
-            for essential_file in "${essential_files[@]}"; do
-                if [[ ! -f "$input_dir/$essential_file" ]]; then
-                    missing_files+=("$essential_file")
-                fi
-            done
-            
-            if [[ ${#missing_files[@]} -gt 0 ]]; then
-                echo "ERROR: Missing essential input files for $benchmark_name:" | tee -a "${dir}/error.log"
-                for missing_file in "${missing_files[@]}"; do
-                    echo "  - $missing_file" | tee -a "${dir}/error.log"
-                done
-                echo "Location: $input_dir" | tee -a "${dir}/error.log"
-                echo "Please ensure SPEC CPU2017 is properly installed with all benchmark data." | tee -a "${dir}/error.log"
-                return 1
-            fi
-            
-            [[ "$VERBOSE" == true ]] && echo " Input files validated successfully"
-            return 0
-        }
-
-        # Validate benchmark input files
-        if ! handle_benchmark_inputs; then
-            echo "ERROR: Input file validation failed" | tee -a "${dir}/error.log"
-            return 1
-        fi
         
         # Run benchmark iterations
         for ((i=0; i<iterations; i++)); do
@@ -613,23 +541,36 @@ run_benchmark() {
             # Run benchmark on all cores
             BENCHMARK_PIDS=()  # Reset global array
             CLEANUP_REQUIRED=true  # Enable cleanup
+            
+            # Extract execution directory from the command - simple approach
+            # Look for input directory pattern in the command
+            input_file_path=$(echo "$command_template" | grep -o '/[^[:space:]]*/input/[^[:space:]]*' | head -1)
+            if [[ -n "$input_file_path" ]]; then
+                execution_input_dir=$(dirname "$input_file_path")
+            else
+                # For benchmarks with no input files (like exchange2), use benchmark root
+                execution_input_dir=$(dirname "$full_binary_path")
+                execution_input_dir=$(dirname "$execution_input_dir")
+            fi
+            
             for core_id in "${core_ids[@]}"; do
                 (
-                    cd "${commands_dir}/${benchmark_num}.${benchmark_name}_s/data/refspeed/input"
+                    cd "$execution_input_dir"
                     echo "Running on core $core_id..."
                     
-                    # Create core-specific command for SpecInt benchmarks
+                    # Create core-specific command for benchmark execution
                     core_command="$processed_command"
                     
-                    # Handle x264 stats file naming (only SpecInt benchmark that needs this)
+                    # Handle x264 stats file naming (only benchmark that needs this)
                     if [[ "$benchmark_name" == "x264" ]]; then
                         core_command="${core_command//x264_stats.log/x264_stats_core${core_id}.log}"
                     fi
                     
                     echo "Command: $full_binary_path ${core_command}"
                     
+                    # Execute with proper working directory
                     taskset -c "$core_id" /usr/bin/time -v \
-                    /bin/bash -lc "$full_binary_path ${core_command}"
+                    /bin/bash -lc "cd '$execution_input_dir' && $full_binary_path ${core_command}"
                 ) > "${log_file}.core${core_id}" 2>&1 & 
                 BENCHMARK_PIDS+=($!)
             done
@@ -690,7 +631,7 @@ run_benchmark() {
     echo ""
     echo " Benchmark execution completed"
     echo "Results saved to: $dir"
-    echo "Execution directory: ${commands_dir}/${benchmark_num}.${benchmark_name}_s/data/refspeed/input"
+    echo "Execution directory: $execution_input_dir"
     
     # Comprehensive result validation
     total_logs=$(find "$dir" -name "*.log.core*" | wc -l)
@@ -748,18 +689,18 @@ run_benchmark() {
 }
 
 # Execute benchmark
-echo "Running $SPECINT_BENCHMARK ($([ "$BASELINE_MODE" == true ] && echo "baseline" || echo "DPF"), $iterations iterations)"
+echo "Running $benchmark_name ($([ "$BASELINE_MODE" == true ] && echo "baseline" || echo "DPF"), $iterations iterations)"
 
 # Execute the benchmark and capture the result
 if     run_benchmark; then
-    echo "SUCCESS: $SPECINT_BENCHMARK completed"
+    echo "SUCCESS: $benchmark_name completed"
     if [[ "$VERBOSE" == true ]]; then
         echo "Results: $results_dir"
     fi
     exit 0
 else
     exit_code=$?
-    echo "FAILED: $SPECINT_BENCHMARK (exit code: $exit_code)"
+    echo "FAILED: $benchmark_name (exit code: $exit_code)"
     if [[ "$VERBOSE" == true ]]; then
         echo "Results: $results_dir"
         echo "Check benchmark_error.log for details"

@@ -69,42 +69,53 @@ log_and_print() {
 }
 
 show_benchmark_list() {
+    # Load configuration to determine suite
+    if [[ -f "$PROJECT_ROOT/config/benchsuite.conf" ]]; then
+        source "$PROJECT_ROOT/config/benchsuite.conf"
+        suite="${BENCHMARK_SUITE:-intspeed}"
+    else
+        suite="intspeed"
+    fi
+    
+    # Load spec command lines
+    source "$PROJECT_ROOT/config/spec_command_lines_benchmark.sh"
+    
     cat << EOF
-Available Benchmarks:
+Available Benchmarks for Suite: $suite
 
-    600.perlbench    - Perl interpreter
-    602.gcc          - GNU C Compiler  
-    605.mcf          - Network flow solver
-    620.omnetpp      - Network simulation
-    623.xalancbmk    - XML transformation
-    625.x264         - Video compression
-    631.deepsjeng    - Chess engine
-    641.leela        - Go game engine
-    648.exchange2    - Artificial intelligence
-    657.xz           - Data compression
+EOF
+    
+    # Display benchmarks from the loaded commands
+    for bench in "${!benchmark_commands[@]}"; do
+        echo "  $bench"
+    done | sort
+    
+    cat << EOF
 
 USAGE:
-    $0 --benchmark BENCHMARK_NAME [--iterations N] [--dpf] [--verbose]
+    $0 --benchmark BENCHMARK_NAME
 
 EXAMPLES:
-    $0 --benchmark 623.xalancbmk
-    $0 --benchmark 602.gcc --iterations 3
-    $0 --benchmark 641.leela --dpf --verbose
+    $0 --benchmark $(echo "${!benchmark_commands[@]}" | cut -d' ' -f1)
+    $0 --benchmark $(echo "${!benchmark_commands[@]}" | cut -d' ' -f2)
 
 EOF
 }
 
 show_config() {
     local config_file="$PROJECT_ROOT/config/benchsuite.conf"
+    
     cat << EOF
 Current Configuration Parameters:
 
 EOF
     if [[ -f "$config_file" ]]; then
         source "$config_file"
+        
         cat << EOF
 PATHS:
     SPEC CPU Directory:    $SPEC_CPU_DIR
+    Benchmark Suite:       ${BENCHMARK_SUITE:-"intspeed"}
     Results Directory:     $RESULTS_DIR
     DPF Binary:           $DPF_BINARY
     Reference Baseline:    ${REFERENCE_BASELINE:-"(not set)"}
@@ -511,10 +522,6 @@ run_single_benchmark() {
     fi
 }
 
-# REMOVED: extract_performance_data() function
-# Analysis should be run separately using compare_performance.py
-# Benchmark execution should focus only on running benchmarks successfully
-
 generate_analysis() {
     if [[ "$VERBOSE" == true ]]; then
         print_section "Generating Performance Analysis and Visualizations"
@@ -636,6 +643,8 @@ VERBOSE=false
 SINGLE_BENCHMARK=""
 BENCHMARK_ITERATIONS=5
 NOTE=""            # Optional annotation for this benchmark run
+SHOW_LIST=false
+SHOW_CONFIG=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -654,13 +663,6 @@ while [[ $# -gt 0 ]]; do
         --benchmark)
             if [ -z "$2" ]; then
                 print_error "--benchmark requires a benchmark name"
-                exit 1
-            fi
-            # Validate benchmark name
-            valid_benchmarks=("600.perlbench" "602.gcc" "605.mcf" "620.omnetpp" "623.xalancbmk" "625.x264" "631.deepsjeng" "641.leela" "648.exchange2" "657.xz")
-            if [[ ! " ${valid_benchmarks[@]} " =~ " $2 " ]]; then
-                print_error "Invalid benchmark: $2"
-                print_error "Use --list to see available benchmarks"
                 exit 1
             fi
             RUN_MODE="single"
@@ -692,12 +694,12 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -l|--list)
-            show_benchmark_list
-            exit 0
+            SHOW_LIST=true
+            shift
             ;;
         --config)
-            show_config
-            exit 0
+            SHOW_CONFIG=true
+            shift
             ;;
         --set-baseline)
             # Set the most recent run as baseline
@@ -731,6 +733,17 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Handle deferred actions that need suite information
+if [ "$SHOW_LIST" = true ]; then
+    show_benchmark_list
+    exit 0
+fi
+
+if [ "$SHOW_CONFIG" = true ]; then
+    show_config
+    exit 0
+fi
 
 # Load configuration early so LOG_FILE can be set
 if [ -f "$PROJECT_ROOT/config/benchsuite.conf" ]; then
@@ -781,6 +794,40 @@ if [ -f "$PROJECT_ROOT/config/benchsuite.conf" ]; then
 else
     print_error "Configuration file not found: $PROJECT_ROOT/config/benchsuite.conf"
     exit 1
+fi
+
+# Validate single benchmark selection if specified
+if [[ -n "$SINGLE_BENCHMARK" ]]; then
+    # Export command line suite override if specified
+    if [[ -n "$BENCHMARK_SUITE" ]]; then
+        export BENCHMARK_SUITE="$BENCHMARK_SUITE"
+    fi
+    
+    # Load spec command lines to get valid benchmarks for current suite
+    source "$PROJECT_ROOT/config/spec_command_lines_benchmark.sh"
+    
+    # Check if the specified benchmark exists in the commands array
+    if [[ -z "${benchmark_commands[$SINGLE_BENCHMARK]}" ]]; then
+        print_error "Invalid benchmark: $SINGLE_BENCHMARK"
+        print_error "Available benchmarks for suite '$suite':"
+        for bench in "${!benchmark_commands[@]}"; do
+            print_error "  $bench"
+        done
+        exit 1
+    fi
+fi
+
+# Validate incompatible options
+if [[ -n "$SINGLE_BENCHMARK" && "$RUN_MODE" == "quick" ]]; then
+    print_error "Cannot specify both --benchmark and --quick"
+    print_error "--quick runs xalancbmk only (use just --quick)"
+    print_error "--benchmark runs a specific benchmark (use just --benchmark)"
+    exit 1
+fi
+
+# Override RUN_MODE if single benchmark is specified
+if [[ -n "$SINGLE_BENCHMARK" ]]; then
+    RUN_MODE="single"
 fi
 
 # Set up error handling
