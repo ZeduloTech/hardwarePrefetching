@@ -178,7 +178,6 @@ export BENCHSUITE_ROOT SPEC_CPU_DIR RESULTS_DIR LOGS_DIR ANALYSIS_DIR DATA_DIR D
 
 #### 3. Path Validation and Setup ###########################################
 dpf_binary="$DPF_BINARY"
-config_file="$DPF_CONFIG"
 commands_dir="$SPEC_CPU_DIR"
 # Use results directory from config
 results_base_dir="$RESULTS_DIR/reports"
@@ -187,10 +186,6 @@ results_base_dir="$RESULTS_DIR/reports"
 if [[ "$BASELINE_MODE" == false ]]; then
     if [[ ! -f "$DPF_BINARY" ]]; then
         echo "ERROR: DPF binary not found at: $DPF_BINARY"
-        exit 1
-    fi
-    if [[ ! -f "$DPF_CONFIG" ]]; then
-        echo "ERROR: DPF config file not found at: $DPF_CONFIG"
         exit 1
     fi
 fi
@@ -299,18 +294,9 @@ if [[ -f "$config_file_path" ]]; then
     # Configuration already sourced above, just map variables
     
     # Map config file variables to script variables
-    use_all_cores=${USE_ALL_CORES:-1}
-    log_arms=${LOG_ARMS:-1}
-    log_ipc=${LOG_IPC:-1}
-    log_bw=${LOG_BW:-1}
     performance=${PERFORMANCE_MODE:-1}
     turbo=${TURBO_MODE:-0}
     rdpmc=${RDPMC:-1}
-    epsilon=${EPSILON:-0.1}
-    gamma=${GAMMA:-0.959}
-    c=${C:-0.0006}
-    arm_configuration=${ARM_CONFIGURATION:-2}
-    reward=${REWARD:-0}
     
     # Parse core IDs from config
     if [[ -n "$CORE_IDS" ]]; then
@@ -323,48 +309,38 @@ else
     echo "Using default values..."
     
     # Default fallback values
-    use_all_cores=1
-    log_arms=1
-    log_ipc=1
-    log_bw=1
     performance=1
     turbo=0
     rdpmc=1
     core_ids=(6 7 8)
-    epsilon=0.1
-    gamma=0.959
-    c=0.0006
-    arm_configuration=2
-    reward=0
 fi
 
 #### 7. Helper Functions ####################################################
 
-
-
-# Simplified config modification for benchmarks
-modify_config() {
-    if [[ "$BASELINE_MODE" == false ]]; then
-        jq --argjson arm_configuration "$arm_configuration" \
-           --argjson epsilon "$epsilon" \
-           --argjson gamma "$gamma" \
-           --argjson c "$c" \
-           --argjson log_arms "$log_arms" \
-           --argjson log_ipc "$log_ipc" \
-           --argjson log_bw "$log_bw" \
-           --argjson use_all_cores "$use_all_cores" \
-           --argjson reward "$reward" \
-           '.arm_configuration = $arm_configuration |
-            .epsilon = $epsilon |
-            .gamma = $gamma |
-            .c = $c |
-            .log_arms = $log_arms |
-            .log_ipc = $log_ipc |
-            .log_bw = $log_bw |
-            .use_all_cores = $use_all_cores |
-            .reward = $reward' \
-           "$config_file" > tmp.json && mv tmp.json "$config_file"
-    fi
+# DPF execution with graceful handling
+start_dpf() {
+    local dpf_log="$1"
+    local baseline="${2:-2}"  # Default to baseline=2 if not provided
+    local config_file="$3"
+    local dpf_dir="$(dirname "$dpf_binary")"
+    
+    # Use hardcoded DPF arguments with timeout for proper termination
+    echo "Starting DPF with arguments: --core $core_range --intervall 1 --ddrbw-set 46000 -l 5 -t 2" >&2
+    echo "DPF working directory: $dpf_dir" >&2
+    echo "DPF log file: $dpf_log" >&2
+    echo "Baseline mode: $baseline" >&2
+    echo "Config file: $config_file" >&2
+    
+    (cd "$dpf_dir" && sudo "$dpf_binary" --core "$core_range" --intervall 1 --ddrbw-set 46000 -l 5 -t 2 > "$dpf_log" 2>&1) &
+    local dpf_pid=$!
+    
+    # Give DPF a moment to initialize
+    sleep 1
+    
+    # Trigger DPF to begin logging
+    sudo kill -SIGUSR1 "$dpf_pid"
+    
+    echo "$dpf_pid"
 }
 
 set_governor_to_performance() {
@@ -519,24 +495,18 @@ run_benchmark() {
             
             # Start DPF only if not in baseline mode
             if [[ "$BASELINE_MODE" == false ]]; then
-                sudo "$dpf_binary" --core "$core_range" --intervall 1 --ddrbw-set 46000 -l 5 -t 2 > "$dpf_log" 2>&1 &
-                DPF_PID=$!
-                sleep 1
+                # Start DPF
+                local baseline_mode=2  # baseline test with logging
+                local config_file="$(dirname "$dpf_binary")/mab_config.json"
+                DPF_PID=$(start_dpf "$dpf_log" "$baseline_mode" "$config_file")
                 echo "DPF started with PID: $DPF_PID"
             else
                 echo "Running in baseline mode - DPF disabled"
                 DPF_PID=""
             fi
                  
-            # Process command to replace absolute input paths with relative ones
+            # Extract command arguments 
             processed_command="${command#* }"  # Remove binary path from command
-            
-            # Smart path processing for SpecInt benchmarks
-            input_dir_pattern="${commands_dir}/${benchmark_num}.${benchmark_name}_s/data/refspeed/input/"
-            # Only replace if the pattern actually exists in the command
-            if [[ "$processed_command" == *"$input_dir_pattern"* ]]; then
-                processed_command="${processed_command//$input_dir_pattern/}"
-            fi
             
             # Run benchmark on all cores
             BENCHMARK_PIDS=()  # Reset global array
@@ -571,27 +541,42 @@ run_benchmark() {
                     # Execute with proper working directory
                     taskset -c "$core_id" /usr/bin/time -v \
                     /bin/bash -lc "cd '$execution_input_dir' && $full_binary_path ${core_command}"
+                    
+                    # Tell DPF we're done on this core
+                    if [[ "$BASELINE_MODE" == false && -n "$DPF_PID" ]]; then
+                        echo "stop $core_id" | sudo socat - UNIX-SENDTO:/tmp/dpf_socket 2>/dev/null || true
+                    fi
                 ) > "${log_file}.core${core_id}" 2>&1 & 
                 BENCHMARK_PIDS+=($!)
             done
             
             echo "Waiting for benchmark processes to complete..."
-            wait "${BENCHMARK_PIDS[@]}"
+            # Wait for all core-pinned workloads to finish
+            for pid in "${BENCHMARK_PIDS[@]}"; do
+                wait "$pid"
+            done
             
+            # Final sleep to ensure all processes have settled
+            sleep 5
+            
+            # Kill DPF process now that all cores are done 
             if [[ "$BASELINE_MODE" == false && -n "$DPF_PID" ]]; then
                 if kill -0 $DPF_PID 2>/dev/null; then
-                    echo "Stopping DPF process with SIGINT"
-                    sudo kill -SIGINT $DPF_PID 2>/dev/null
+                    echo "Killing DPF process (PID: $DPF_PID)"
+                    sudo kill $DPF_PID 2>/dev/null
+                    # Give DPF time to terminate gracefully
                     sleep 2
-                    # Check if graceful shutdown worked
+                    # Force kill if still running
                     if kill -0 $DPF_PID 2>/dev/null; then
-                        echo "DPF process still running, using SIGTERM"
-                        sudo kill -TERM $DPF_PID 2>/dev/null
+                        echo "DPF still running, forcing termination"
+                        sudo kill -9 $DPF_PID 2>/dev/null
                     fi
-                    wait $DPF_PID 2>/dev/null
                     echo "DPF stopped"
                 fi
             fi
+            
+            # Final sleep to ensure all processes have settled
+            sleep 10
             
             # Clear process arrays after successful completion
             BENCHMARK_PIDS=()

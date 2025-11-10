@@ -14,6 +14,8 @@ source "scripts/utils/workflow_management.sh" 2>/dev/null || true
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+# Export timestamp for use by child scripts
+export SHARED_TIMESTAMP="$TIMESTAMP"
 # LOG_FILE will be set after configuration is loaded
 
 # Color codes for output
