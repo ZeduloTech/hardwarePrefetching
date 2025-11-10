@@ -152,6 +152,7 @@ OPTIONS:
     --quick                Run development test (1 iteration across xalancbmk only)
     --benchmark BENCHMARK  Run single benchmark (specify benchmark name)
     --iterations N         Number of iterations for single benchmark (default: 5)
+    --note TEXT           Add annotation to benchmark run (reflected in directory/file names)
     --dpf                  Add dpf analysis to any mode
     --verbose              Enable verbose output
     -l, --list             List available benchmarks
@@ -189,6 +190,8 @@ EXAMPLES:
     $0 --quick                # Development: 1 iteration across xalancbmk only (5 minutes)
     $0 --benchmark 602.gcc    # Single benchmark: GCC (5 iterations, 1-3 hours)
     $0 --benchmark 623.xalancbmk --iterations 3  # Single benchmark with custom iterations
+    $0 --quick --note L2Q_val4_XQ_val5  # Quick test with annotation
+    $0 --baseline --note stable_config  # Baseline with annotation
     $0 --dpf                  # Full suite + dpf analysis
     $0 --baseline --dpf       # Comprehensive + dpf analysis
     $0 --quick --dpf          # Quick test + dpf analysis
@@ -347,6 +350,7 @@ run_baseline_benchmarks() {
     
     # Export run mode and verbose flag for suite scripts  
     export RUN_MODE="$RUN_MODE"
+    export NOTE="$NOTE"
     export VERBOSE="$VERBOSE"
     
     if [ "$VERBOSE" = true ]; then
@@ -390,6 +394,7 @@ run_dpf_benchmarks() {
     
     # Export run mode and verbose flag for suite scripts  
     export RUN_MODE="$RUN_MODE"
+    export NOTE="$NOTE"
     export VERBOSE="$VERBOSE"
     
     if [ "$VERBOSE" = true ]; then
@@ -434,6 +439,7 @@ run_standard_benchmarks() {
     
     # Export run mode and verbose flag for suite scripts  
     export RUN_MODE="$RUN_MODE"
+    export NOTE="$NOTE"
     export VERBOSE="$VERBOSE"
     
     if [ "$VERBOSE" = true ]; then
@@ -482,6 +488,7 @@ run_single_benchmark() {
     
     # Export environment variables
     export RUN_MODE="$RUN_MODE"
+    export NOTE="$NOTE"
     export VERBOSE="$VERBOSE"
     
     if [ "$VERBOSE" = true ]; then
@@ -628,6 +635,7 @@ DPF_ENABLED=false
 VERBOSE=false
 SINGLE_BENCHMARK=""
 BENCHMARK_ITERATIONS=5
+NOTE=""            # Optional annotation for this benchmark run
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -665,6 +673,14 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             BENCHMARK_ITERATIONS="$2"
+            shift 2
+            ;;
+        --note)
+            if [ -z "$2" ]; then
+                print_error "--note requires an annotation string"
+                exit 1
+            fi
+            NOTE="$2"
             shift 2
             ;;
         --dpf)
@@ -754,7 +770,11 @@ if [ -f "$PROJECT_ROOT/config/benchsuite.conf" ]; then
     DPF_CONFIG="$(dirname "$DPF_BINARY")/mab_config.json"
     
     # Set log file path now that LOGS_DIR is available
-    LOG_FILE="$LOGS_DIR/complete_analysis_$TIMESTAMP.log"
+    if [[ -n "$NOTE" ]]; then
+        LOG_FILE="$LOGS_DIR/complete_analysis_${TIMESTAMP}_${NOTE}.log"
+    else
+        LOG_FILE="$LOGS_DIR/complete_analysis_$TIMESTAMP.log"
+    fi
     
     # Export variables for Python scripts
     export BENCHSUITE_ROOT SPEC_CPU_DIR RESULTS_DIR LOGS_DIR ANALYSIS_DIR VISUALIZATIONS_DIR DPF_BINARY DPF_CONFIG

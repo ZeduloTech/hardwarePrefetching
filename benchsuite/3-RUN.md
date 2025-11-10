@@ -42,10 +42,14 @@
 # Execution flags
 ./run_all.sh --dpf             # Add dpf analysis to any mode
 ./run_all.sh --verbose          # Detailed output
+./run_all.sh --note TEXT       # Annotate run with custom identifier
 
 # Single benchmark
 sudo ./run_all.sh --benchmark 623.xalancbmk  # Run single benchmark (xalancbmk)
 sudo ./run_all.sh --benchmark 602.gcc --iterations 3 # Specify iterations
+
+# Annotated runs for tracking different configurations
+./run_all.sh --quick --note L2Q_val4_XQ_val5    # Quick test with annotation
 
 # Single benchmark examples
 sudo ./run_all.sh --benchmark 623.xalancbmk

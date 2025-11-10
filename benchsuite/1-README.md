@@ -40,7 +40,7 @@ This framework provides automated:
 ## Project Structure
 
 ```
-bench_suite/
+benchsuite/
 ├── run_all.sh                # Main execution script
 ├── config/                   # Configuration files
 ├── scripts/                  # Execution and analysis scripts

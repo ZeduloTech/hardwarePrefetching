@@ -205,13 +205,20 @@ timestamp=$(date +"%Y%m%d-%H%M%S")
 if [[ "$BASELINE_MODE" == true ]]; then
     # Standard mode (DPF disabled) - use mode-specific suffix
     if [[ -n "$RUN_MODE" ]]; then
-        results_dir="${results_base_dir}/${timestamp}_${RUN_MODE}"
+        base_name="${timestamp}_${RUN_MODE}"
     else
-        results_dir="${results_base_dir}/${timestamp}_standard"
+        base_name="${timestamp}_standard"
     fi
 else
     # DPF enabled mode
-    results_dir="${results_base_dir}/${timestamp}_dpf"
+    base_name="${timestamp}_dpf"
+fi
+
+# Add note annotation if provided
+if [[ -n "$NOTE" ]]; then
+    results_dir="${results_base_dir}/${base_name}_${NOTE}"
+else
+    results_dir="${results_base_dir}/${base_name}"
 fi
 if ! mkdir -p "${results_dir}"; then
     echo "ERROR: Failed to create results directory: $results_dir"
