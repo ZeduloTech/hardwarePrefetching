@@ -392,7 +392,7 @@ int kernel_tuning_control(uint32_t tuning_status, uint32_t tunealg, float aggr_f
 	uint32_t aggr_scaled;
 
 	// Validate aggressiveness factor range
-	if (aggr_factor < 0.0f || aggr_factor > 5.0f) {
+	if (aggr_factor < 0.0f || aggr_factor > 10.0f) {
 		loge(TAG, "Aggressiveness factor out of range (0.0-5.0): %.1f\n", aggr_factor);
 		return -1;
 	}

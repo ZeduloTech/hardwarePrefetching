@@ -17,10 +17,13 @@
 #define SCORE_EVENT_B PERF_CPU_CLK_UNHALTED_THREAD
 
 // Compile-time right-shift applied to PMU event deltas before scoring.
-// SHIFT_A=0, SHIFT_B=10 gives (instructions>>0)/(cycles>>10) ≈ IPC*1000.
+// SHIFT_A=0, SHIFT_B=14 gives (instructions>>0)/(cycles>>14) ≈ IPC*1000.
 // Expected score range: 500 (IPC 0.5) to 2500 (IPC 2.5).
 #define SHIFT_A (0)
-#define SHIFT_B (10)
+#define SHIFT_B (14)
+
+#define MIN_AGGRESSIVENESS (1)
+#define AGGR_REDUCTION_FACTOR (4)  // Penalty = aggr / 4
 
 // Number of consecutive idle intervals before core MAB state is reset.
 #define IDLE_THRESHOLD (5)
@@ -59,6 +62,9 @@ struct mab_module {
 	int active_arm;   // arm currently applied to all cores in this module
 	int initialized;  // uses MAB_INIT_NOT_STARTED / IN_PROGRESS / DONE
 	int idle_counter; // consecutive idle ticks before module state is reset
+	__u32 arm_aggressiveness[MAX_ARMS]; // per-arm exploration boost
+	__u32 arm_consecutive_runs[MAX_ARMS]; // consecutive intervals running
+	__u32 arm_consecutive_wins[MAX_ARMS]; // consecutive wins for restore
 };
 
 // Declare the global MAB state arrays for cores, modules, and arm configurations.
