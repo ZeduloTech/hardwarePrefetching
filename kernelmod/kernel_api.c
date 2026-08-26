@@ -213,7 +213,7 @@ int api_tuning(struct dpf_req_tuning_s *req_data)
 	// Userspace scales aggr by 10 to avoid floats (e.g. 1.0 -> 10).
 	// Divided by 10 here once so MAB sees the intended value at runtime.
 	tune_alg = req->tunealg;
-	aggr = req->aggr;
+	aggr = req->aggr / 10;
 
 	// Set response values
 	resp->confirmed_tunealg = tune_alg;
