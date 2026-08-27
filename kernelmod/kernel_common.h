@@ -53,8 +53,8 @@ typedef struct {
 #define PMU_ENTRY_SIZE_BYTES sizeof(dpf_pmu_log_entry_t)
 
 // Event types for PMU configuration (64-bit event codes including config bits)
-#define EVENT_CPU_CLK_UNHALTED_THREAD       (0x00000000004300c0ULL) // Event 0x00, UMask 0xc0, Enable
-#define EVENT_INST_RETIRED_ANY_P            (0x00000000004300c2ULL) // Event 0x00, UMask 0xc2, Enable
+#define EVENT_CPU_CLK_UNHALTED_THREAD       (0x000000000043003cULL) // Event 0x00, UMask 0xc0, Enable
+#define EVENT_INST_RETIRED_ANY_P            (0x00000000004300c0ULL) // Event 0x00, UMask 0xc0, Enable
 #define EVENT_MEM_UOPS_RETIRED_ALL_LOADS    (0x00000000004381d0ULL) // Event 0x81, UMask 0xd0, Enable
 #define EVENT_MEM_LOAD_UOPS_RETIRED_L2_HIT  (0x0000000000430224ULL) // Event 0x24, UMask 0x02, L2-hit
 #define EVENT_MEM_LOAD_UOPS_RETIRED_L2_MISS (0x0000000000430124ULL) // Event 0x24, UMask 0x01, L2-miss
