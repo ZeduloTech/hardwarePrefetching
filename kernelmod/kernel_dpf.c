@@ -70,8 +70,8 @@ static void configure_pmu_on_core(void *info)
 
 	// Configure Performance Event Select registers (PERFEVTSELx MSRs)
 	native_write_msr(MSR_IA32_PERFEVTSEL0,
-		EVENT_MEM_UOPS_RETIRED_ALL_LOADS & MSR_LOW_MASK,
-		EVENT_MEM_UOPS_RETIRED_ALL_LOADS >> 32);
+		EVENT_LD_HEAD_ANY_AT_RET & MSR_LOW_MASK,
+		EVENT_LD_HEAD_ANY_AT_RET >> 32);
 	native_write_msr(MSR_IA32_PERFEVTSEL1,
 		EVENT_MEM_LOAD_UOPS_RETIRED_L2_HIT & MSR_LOW_MASK,
 		EVENT_MEM_LOAD_UOPS_RETIRED_L2_HIT >> 32);

@@ -24,7 +24,7 @@ int pmu_update(int core_id)
 		corestate[core_id].pmu_old[i] = corestate[core_id].pmu_raw[i];
 
 	// Update PMU counters using the defined indices from kernel_common.h
-	corestate[core_id].pmu_raw[PERF_MEM_UOPS_RETIRED_ALL_LOADS] = native_read_pmc(0);
+	corestate[core_id].pmu_raw[PERF_LD_HEAD_ANY_AT_RET] = native_read_pmc(0);
 	corestate[core_id].pmu_raw[PERF_MEM_LOAD_UOPS_RETIRED_L2_HIT] = native_read_pmc(1);
 	corestate[core_id].pmu_raw[PERF_MEM_LOAD_UOPS_RETIRED_L3_HIT] =	native_read_pmc(2);
 	corestate[core_id].pmu_raw[PERF_MEM_LOAD_UOPS_RETIRED_DRAM_HIT] = native_read_pmc(3);

@@ -1,10 +1,14 @@
 #ifndef __KERNEL_MAB_H__
 #define __KERNEL_MAB_H__
 
+#ifdef SIM
+#include "sim.h"
+#else
 #include <linux/types.h>
 
 #include "kernel_common.h"
 #include "kernel_primitive.h"
+#endif
 
 // Compile-time bounds for number of active arms in kernel MAB.
 #define MIN_ARMS (2)
@@ -12,15 +16,25 @@
 
 #define AVAILABLE_ARMS (2)
 
-// Default PMU events used for active arm scoring.
-#define SCORE_EVENT_A PERF_INST_RETIRED_ANY_P
+// Active-arm scoring metric. Change MAB_SCORE_MODE to pick one; it applies to
+// both the kernel module and the -DSIM offline sim (both include this header).
+#define MAB_SCORE_IPC      (0)  // score: (instructions        >> SHIFT_A) / (cycles >> SHIFT_B)
+#define MAB_SCORE_LOADHEAD (1)  // score: ((cycles - loadhead) >> SHIFT_A) / (cycles >> SHIFT_B)
+
+#define MAB_SCORE_MODE MAB_SCORE_IPC
+
+// Right-shifts applied before dividing; SHIFT_B sets the score scale.
+// Change freely: SHIFT_B=10 -> ~*1000, 12 -> ~*4096, 14 -> ~*16384.
+#define SHIFT_A (0)
+#define SHIFT_B (10)
+
 #define SCORE_EVENT_B PERF_CPU_CLK_UNHALTED_THREAD
 
-// Compile-time right-shift applied to PMU event deltas before scoring.
-// SHIFT_A=0, SHIFT_B=14 gives (instructions>>0)/(cycles>>14) ≈ IPC*1000.
-// Expected score range: 500 (IPC 0.5) to 2500 (IPC 2.5).
-#define SHIFT_A (0)
-#define SHIFT_B (14)
+#if MAB_SCORE_MODE == MAB_SCORE_IPC
+#define SCORE_EVENT_A PERF_INST_RETIRED_ANY_P
+#elif MAB_SCORE_MODE == MAB_SCORE_LOADHEAD
+#define SCORE_EVENT_A PERF_LD_HEAD_ANY_AT_RET
+#endif
 
 #define MIN_AGGRESSIVENESS (1)
 #define AGGR_REDUCTION_FACTOR (4)  // Penalty = aggr / 4

@@ -53,18 +53,19 @@ typedef struct {
 #define PMU_ENTRY_SIZE_BYTES sizeof(dpf_pmu_log_entry_t)
 
 // Event types for PMU configuration (64-bit event codes including config bits)
-#define EVENT_CPU_CLK_UNHALTED_THREAD       (0x000000000043003cULL) // Event 0x00, UMask 0xc0, Enable
-#define EVENT_INST_RETIRED_ANY_P            (0x00000000004300c0ULL) // Event 0x00, UMask 0xc0, Enable
+#define EVENT_CPU_CLK_UNHALTED_THREAD       (0x000000000043003CULL) // Event 0x3C, UMask 0x00, Enable (CPU_CLK_UNHALTED.THREAD)
+#define EVENT_INST_RETIRED_ANY_P            (0x00000000004300c2ULL) // Event 0x00, UMask 0xc2, Enable
 #define EVENT_MEM_UOPS_RETIRED_ALL_LOADS    (0x00000000004381d0ULL) // Event 0x81, UMask 0xd0, Enable
 #define EVENT_MEM_LOAD_UOPS_RETIRED_L2_HIT  (0x0000000000430224ULL) // Event 0x24, UMask 0x02, L2-hit
 #define EVENT_MEM_LOAD_UOPS_RETIRED_L2_MISS (0x0000000000430124ULL) // Event 0x24, UMask 0x01, L2-miss
 #define EVENT_MEM_LOAD_UOPS_RETIRED_L3_HIT  (0x00000000004304d1ULL) // Event 0x04, UMask 0xd1, Enable
 #define EVENT_MEM_LOAD_UOPS_RETIRED_DRAM_HIT (0x00000000004380d1ULL) // Event 0x80, UMask 0xd1, Enable
 #define EVENT_XQ_PROMOTION_ALL              (0x00000000004300f4ULL) // Event 0x00, UMask 0xf4, Enable (custom)
+#define EVENT_LD_HEAD_ANY_AT_RET            (0x000000000043FF05ULL) // Event 0x05, UMask 0xFF, Enable (LD_HEAD.ANY_AT_RET)
 
 // Enum for PMU metrics (mapped to pmu_result[] indices and event codes)
 enum pmu_metrics {
-    PERF_MEM_UOPS_RETIRED_ALL_LOADS = 0,    // Index 0: All load uops retired
+    PERF_LD_HEAD_ANY_AT_RET = 0,            // Index 0: LD_HEAD.ANY_AT_RET (event 0x05, umask 0xFF)
     PERF_MEM_LOAD_UOPS_RETIRED_L2_HIT,      // Index 1: Load uops retired hitting L2 cache
     PERF_MEM_LOAD_UOPS_RETIRED_L3_HIT,      // Index 2: Load uops retired hitting L3 cache
     PERF_MEM_LOAD_UOPS_RETIRED_DRAM_HIT,    // Index 3: Load uops retired hitting DRAM

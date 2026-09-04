@@ -31,4 +31,5 @@
 *.out
 *.app
 dpf
+kernelmod/sim/sim
 .vscode/c_cpp_properties.json

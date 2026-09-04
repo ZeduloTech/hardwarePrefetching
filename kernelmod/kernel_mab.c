@@ -1,11 +1,20 @@
+#ifdef SIM
+#include "sim.h"
+#else
 #include <linux/ktime.h>
 #include <linux/printk.h>
+#endif
 
 #include "kernel_mab.h"
 #include "kernel_primitive.h"
 
+#ifdef SIM
+// sim has no api_tuning(); aggressiveness is a compile-time constant.
+#define aggr (5)
+#else
 // Runtime aggressiveness parameter set by userspace via api_tuning().
 extern int aggr;
+#endif
 
 // define persistent kernel MAB state.
 // Runtime logic wiring is intentionally deferred to later tasks.
@@ -117,33 +126,53 @@ static int mab_apply_msr_config(int core_id, int arm_id)
 	return 0;
 }
 
-// Compute the active arm score for the given core.
-// Uses shift-scaled PMU deltas: (event_a >> SHIFT_A) / (event_b >> SHIFT_B).
-// Returns 0 if b_scaled would be zero to avoid division by zero.
+// Compute the active arm score for the given core (higher = better).
+// IPC mode:      (instructions        >> SHIFT_A) / (cycles >> SHIFT_B)
+// LoadHead mode: ((cycles - load_head) >> SHIFT_A) / (cycles >> SHIFT_B)
+// Returns 0 when there is no usable signal (b_scaled 0, or load_head >= cycles).
 static __u32 mab_compute_score(int core_id)
 {
-	__u64 event_a;
-	__u64 event_b;
-	__u64 a_scaled;
-	__u64 b_scaled;
+	__u64 event_a;		// IPC mode: instructions | LoadHead mode: load-head cycles
+	__u64 event_b;		// cycles (both modes)
+	__u64 b_scaled;		// cycles >> SHIFT_B (denominator)
 
 	event_a = corestate[core_id].pmu_raw[SCORE_EVENT_A] -
 		corestate[core_id].pmu_old[SCORE_EVENT_A];
 	event_b = corestate[core_id].pmu_raw[SCORE_EVENT_B] -
 		corestate[core_id].pmu_old[SCORE_EVENT_B];
 
-	a_scaled = event_a >> SHIFT_A;
-	b_scaled = event_b >> SHIFT_B;
-
-	pr_info("MAB score core %d: instr=%llu cyc=%llu a_sc=%llu b_sc=%llu score=%u\n",
-		core_id, event_a, event_b, a_scaled, b_scaled,
-		(__u32)(a_scaled / b_scaled));
-
-	if (b_scaled == 0) {
+	b_scaled = event_b >> SHIFT_B;			// cycles
+	if (b_scaled == 0)
 		return 0;
-	}
 
-	return (__u32)(a_scaled / b_scaled);
+	// Kernel_mab.h defines MAB_SCORE_MODE to select the scoring mode at compile time. 
+#if MAB_SCORE_MODE == MAB_SCORE_IPC
+	{
+		__u64 a_scaled = event_a >> SHIFT_A;		// instructions
+
+		pr_info("MAB score core %d [IPC]: instr=%llu cyc=%llu a_sc=%llu b_sc=%llu score=%u\n",
+			core_id, event_a, event_b, a_scaled, b_scaled,
+			(__u32)(a_scaled / b_scaled));
+
+		return (__u32)(a_scaled / b_scaled);
+	}
+#elif MAB_SCORE_MODE == MAB_SCORE_LOADHEAD
+	{
+		__u64 a_b_scaled;
+
+		if (event_a >= event_b)				// stalled on loads the whole interval
+			return 0;
+		a_b_scaled = (event_b - event_a) >> SHIFT_A;	// cycles not stalled on loads
+
+		pr_info("MAB score core %d [LDHEAD]: ldhead=%llu cyc=%llu a_b_sc=%llu b_sc=%llu score=%u\n",
+			core_id, event_a, event_b, a_b_scaled, b_scaled,
+			(__u32)(a_b_scaled / b_scaled));
+
+		return (__u32)(a_b_scaled / b_scaled);
+	}
+#else
+#error "MAB_SCORE_MODE must be MAB_SCORE_IPC or MAB_SCORE_LOADHEAD"
+#endif
 }
 
 // Returns 1 if core is active, 0 if idle, -1 on error or first call.
@@ -202,59 +231,7 @@ void mab_setup_default_arms(void)
 	pr_info("MAB: default arm configs loaded (arm0=boot_default, arm1=aggressive)\n");
 }
 
-// Perform one non-blocking initialization step for one core.
-// Caller must ensure initialized < MAB_INIT_DONE and core is active.
-// Returns 0 on success, -1 on error.
-int mab_init_core_step(int core_id)
-{
-	int i;
-	int best_arm;
-	int active_arm;
-	__u32 score;
 
-	// First call: apply arm 0 and begin scanning.
-	if (mab_cores[core_id].initialized == MAB_INIT_NOT_STARTED) {
-		if (mab_apply_msr_config(core_id, 0) < 0)
-			return -EINVAL;
-
-		mab_cores[core_id].active_arm = 0;
-		mab_cores[core_id].initialized = MAB_INIT_IN_PROGRESS;
-
-		return 0;
-	}
-
-	// Score the arm that ran last interval.
-	score = mab_compute_score(core_id);
-	active_arm = mab_cores[core_id].active_arm;
-	mab_cores[core_id].arms[active_arm].last_score =
-		mab_cores[core_id].arms[active_arm].score;
-	mab_cores[core_id].arms[active_arm].score = score;
-
-	// Advance to next arm if there are more to test.
-	if (active_arm + 1 < AVAILABLE_ARMS) {
-		mab_cores[core_id].active_arm++;
-
-		if (mab_apply_msr_config(core_id, mab_cores[core_id].active_arm) < 0)
-			return -EINVAL;
-
-		return 0;
-	}
-
-	// All arms scored: find the best and activate it.
-	best_arm = 0;
-	for (i = 1; i < AVAILABLE_ARMS; i++) {
-		if (mab_cores[core_id].arms[i].score > mab_cores[core_id].arms[best_arm].score)
-			best_arm = i;
-	}
-
-	mab_cores[core_id].active_arm = best_arm;
-
-	if (mab_apply_msr_config(core_id, best_arm) < 0)
-		return -EINVAL;
-	mab_cores[core_id].initialized = MAB_INIT_DONE;
-
-	return 0;
-}
 
 // Main MAB algorithm for initialized cores.
 // All cores update their own per-core arm scores each tick.
