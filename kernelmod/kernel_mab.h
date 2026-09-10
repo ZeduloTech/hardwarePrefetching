@@ -18,10 +18,13 @@
 
 // Active-arm scoring metric. Change MAB_SCORE_MODE to pick one; it applies to
 // both the kernel module and the -DSIM offline sim (both include this header).
-#define MAB_SCORE_IPC      (0)  // score: (instructions        >> SHIFT_A) / (cycles >> SHIFT_B)
-#define MAB_SCORE_LOADHEAD (1)  // score: ((cycles - loadhead) >> SHIFT_A) / (cycles >> SHIFT_B)
+// Values matter: the mode is selected with `#if MAB_SCORE_MODE == ...`.
+#define MAB_SCORE_IPC      (0)
+#define MAB_SCORE_LOADHEAD (1)
 
+#ifndef MAB_SCORE_MODE
 #define MAB_SCORE_MODE MAB_SCORE_IPC
+#endif
 
 // Right-shifts applied before dividing; SHIFT_B sets the score scale.
 // Change freely: SHIFT_B=10 -> ~*1000, 12 -> ~*4096, 14 -> ~*16384.

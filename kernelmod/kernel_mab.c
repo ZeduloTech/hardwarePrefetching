@@ -134,23 +134,20 @@ static __u32 mab_compute_score(int core_id)
 {
 	__u64 event_a;		// IPC mode: instructions | LoadHead mode: load-head cycles
 	__u64 event_b;		// cycles (both modes)
-	__u64 b_scaled; 
 
 	event_a = corestate[core_id].pmu_raw[SCORE_EVENT_A] -
 		corestate[core_id].pmu_old[SCORE_EVENT_A];
 	event_b = corestate[core_id].pmu_raw[SCORE_EVENT_B] -
 		corestate[core_id].pmu_old[SCORE_EVENT_B];
 
-	b_scaled = event_b >> SHIFT_B;			// cycles
-
-
-	// Kernel_mab.h defines MAB_SCORE_MODE to select the scoring mode at compile time. 
+	// Kernel_mab.h defines MAB_SCORE_MODE to select the scoring mode at compile time.
 #if MAB_SCORE_MODE == MAB_SCORE_IPC
 	{
-		__u64 a_scaled = event_a >> SHIFT_A;		// instructions
-		__u64 b_scaled = event_b >> SHIFT_B ;	// cycles (denominator)
+		__u64 a_scaled = event_a >> SHIFT_A;
+		__u64 b_scaled = event_b >> SHIFT_B;
+
 		if (b_scaled == 0)
-		return 0;
+			return 0;
 		
 		pr_info("MAB score core %d [IPC]: instr=%llu cyc=%llu a_sc=%llu b_sc=%llu score=%u\n",
 			core_id, event_a, event_b, a_scaled, b_scaled,
@@ -168,7 +165,7 @@ static __u32 mab_compute_score(int core_id)
 		
 		if (event_a >= event_b)				// stalled on loads the whole interval
 			return 0;
-		a_b_scaled = (event_b - event_a) >> SHIFT_A;	// cycles not stalled on loads
+		a_b_scaled = (event_b - event_a);
 
 		pr_info("MAB score core %d [LDHEAD]: ldhead=%llu cyc=%llu a_b_sc=%llu b_sc=%llu score=%u\n",
 			core_id, event_a, event_b, a_b_scaled, b_scaled,
