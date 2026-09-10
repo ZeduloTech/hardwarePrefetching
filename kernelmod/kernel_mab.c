@@ -134,6 +134,7 @@ static __u32 mab_compute_score(int core_id)
 {
 	__u64 event_a;		// IPC mode: instructions | LoadHead mode: load-head cycles
 	__u64 event_b;		// cycles (both modes)
+	__u64 b_scaled; 
 
 	event_a = corestate[core_id].pmu_raw[SCORE_EVENT_A] -
 		corestate[core_id].pmu_old[SCORE_EVENT_A];
