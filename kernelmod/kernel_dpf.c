@@ -70,29 +70,29 @@ static void configure_pmu_on_core(void *info)
 
 	// Configure Performance Event Select registers (PERFEVTSELx MSRs)
 	native_write_msr(MSR_IA32_PERFEVTSEL0,
-		EVENT_MEM_UOPS_RETIRED_ALL_LOADS & MSR_LOW_MASK,
-		EVENT_MEM_UOPS_RETIRED_ALL_LOADS >> 32);
+			 EVENT_MEM_UOPS_RETIRED_ALL_LOADS & MSR_LOW_MASK,
+			 EVENT_MEM_UOPS_RETIRED_ALL_LOADS >> 32);
 	native_write_msr(MSR_IA32_PERFEVTSEL1,
-		EVENT_MEM_LOAD_UOPS_RETIRED_L2_HIT & MSR_LOW_MASK,
-		EVENT_MEM_LOAD_UOPS_RETIRED_L2_HIT >> 32);
+			 EVENT_MEM_LOAD_UOPS_RETIRED_L2_HIT & MSR_LOW_MASK,
+			 EVENT_MEM_LOAD_UOPS_RETIRED_L2_HIT >> 32);
 	native_write_msr(MSR_IA32_PERFEVTSEL2,
-		EVENT_MEM_LOAD_UOPS_RETIRED_L3_HIT & MSR_LOW_MASK,
-		EVENT_MEM_LOAD_UOPS_RETIRED_L3_HIT >> 32);
+			 EVENT_MEM_LOAD_UOPS_RETIRED_L3_HIT & MSR_LOW_MASK,
+			 EVENT_MEM_LOAD_UOPS_RETIRED_L3_HIT >> 32);
 	native_write_msr(MSR_IA32_PERFEVTSEL3,
-		EVENT_MEM_LOAD_UOPS_RETIRED_DRAM_HIT & MSR_LOW_MASK,
-		EVENT_MEM_LOAD_UOPS_RETIRED_DRAM_HIT >> 32);
+			 EVENT_MEM_LOAD_UOPS_RETIRED_DRAM_HIT & MSR_LOW_MASK,
+			 EVENT_MEM_LOAD_UOPS_RETIRED_DRAM_HIT >> 32);
 	native_write_msr(MSR_IA32_PERFEVTSEL4,
-		EVENT_XQ_PROMOTION_ALL & MSR_LOW_MASK,
-		EVENT_XQ_PROMOTION_ALL >> 32);
+			 EVENT_XQ_PROMOTION_ALL & MSR_LOW_MASK,
+			 EVENT_XQ_PROMOTION_ALL >> 32);
 	native_write_msr(MSR_IA32_PERFEVTSEL5,
-		EVENT_CPU_CLK_UNHALTED_THREAD & MSR_LOW_MASK,
-		EVENT_CPU_CLK_UNHALTED_THREAD >> 32);
+			 EVENT_CPU_CLK_UNHALTED_THREAD & MSR_LOW_MASK,
+			 EVENT_CPU_CLK_UNHALTED_THREAD >> 32);
 	native_write_msr(MSR_IA32_PERFEVTSEL6,
-		EVENT_INST_RETIRED_ANY_P & MSR_LOW_MASK,
-		EVENT_INST_RETIRED_ANY_P >> 32);
+			 EVENT_INST_RETIRED_ANY_P & MSR_LOW_MASK,
+			 EVENT_INST_RETIRED_ANY_P >> 32);
 	native_write_msr(MSR_IA32_PERFEVTSEL7,
-		EVENT_MEM_LOAD_UOPS_RETIRED_L2_MISS & MSR_LOW_MASK,
-		EVENT_MEM_LOAD_UOPS_RETIRED_L2_MISS >> 32);
+			 EVENT_MEM_LOAD_UOPS_RETIRED_L2_MISS & MSR_LOW_MASK,
+			 EVENT_MEM_LOAD_UOPS_RETIRED_L2_MISS >> 32);
 
 	// Reset the performance counter control register first
 	native_write_msr(MSR_IA32_PERF_GLOBAL_STATUS, 0, 0); // Clear performance counters status
@@ -155,7 +155,7 @@ static ssize_t proc_read(struct file *file, char __user *buffer,
 	// Copy data to user space
 	if (copy_to_user(buffer, proc_buffer + *pos, bytes_to_copy)) {
 		pr_err("%s: Failed to copy %zu bytes to user buffer\n",
-		      __func__, bytes_to_copy);
+		       __func__, bytes_to_copy);
 		return -EFAULT;
 	}
 
@@ -230,7 +230,7 @@ static ssize_t dpf_proc_write(struct file *file, const char __user *buffer,
 	case DPF_MSG_DDR_BW_READ:
 		ret = api_ddr_bw_read(msg_data);
 		break;
-		case DPF_MSG_PMU_LOG_CONTROL:
+	case DPF_MSG_PMU_LOG_CONTROL:
 		ret = api_pmu_log_control(msg_data);
 		break;
 	case DPF_MSG_PMU_LOG_STOP:
@@ -252,8 +252,8 @@ static ssize_t dpf_proc_write(struct file *file, const char __user *buffer,
 
 // proc file operations
 static const struct proc_ops proc_fops = {
-	.proc_read = proc_read,
-	.proc_write = dpf_proc_write,
+    .proc_read = proc_read,
+    .proc_write = dpf_proc_write,
 };
 
 // Per-core work function executed on each CPU core
@@ -331,8 +331,8 @@ static void per_core_work(void *info)
 			if (core_id == mab_first_enabled_core(module_id
 				(core_id))) {
 
-					mab_modules[module_id(core_id)]
-						.idle_counter++;
+				mab_modules[module_id(core_id)]
+				    .idle_counter++;
 
 				if (mab_modules[module_id(core_id)].
 					idle_counter > IDLE_THRESHOLD) {
@@ -363,7 +363,7 @@ static void per_core_work(void *info)
 			// leader=%d\n", core_id, module_leader);
 
 			if (mab_modules[module_id(core_id)]
-			.initialized == MAB_INIT_DONE) {
+				.initialized == MAB_INIT_DONE) {
 
 				int ret = mab_tuning(core_id);
 
@@ -410,7 +410,7 @@ static void monitor_work_func(struct work_struct *work)
 		// Now safe to call smp_call_function_many from task context
 		// wait=true ensures synchronization before returning
 		smp_call_function_many(&enabled_cpus, per_core_work,
-					NULL, true);
+				       NULL, true);
 	}
 }
 
@@ -507,6 +507,20 @@ static void __exit dpf_module_exit(void) {
 			ddr.mmap[i] = NULL;
 		}
 	}
+
+	// MSR shadow-write summary for this module lifetime: how many
+	// prefetch MSR writes were actually performed vs skipped as unchanged.
+	// Counters are per-core in corestate[], so sum them directly here.
+	unsigned long writes = 0;
+	unsigned long skipped = 0;
+
+	for (int i = 0; i < MAX_NUM_CORES; i++) {
+		writes += corestate[i].msr_written;
+		skipped += corestate[i].msr_skipped;
+	}
+
+	pr_info("dPF: MSR shadow optimization: writes=%lu skipped=%lu\n",
+		writes, skipped);
 
 	pr_info("dPF Module Unloaded\n");
 }

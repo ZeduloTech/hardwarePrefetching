@@ -17,15 +17,17 @@
 // PMU counters: 8 total (cycles, instructions, and 6 additional events)
 #define PMU_COUNTERS (8)
 
-// MSR definitions: 7 MSRs monitored
-#define NR_OF_MSR (7)
+// MSR definitions: 9 MSRs monitored
+#define NR_OF_MSR (9)
 #define MSR_1320_INDEX (0)  // Index for MSR 0x1320 (e.g., L2_STREAM_AMP_XQ_THRESHOLD)
 #define MSR_1321_INDEX (1)  // Index for MSR 0x1321
 #define MSR_1322_INDEX (2)  // Index for MSR 0x1322
 #define MSR_1323_INDEX (3)  // Index for MSR 0x1323
 #define MSR_1324_INDEX (4)  // Index for MSR 0x1324
-#define MSR_1327_INDEX (5)  // Index for MSR 0x1327
-#define MSR_1A4_INDEX (6)   // Index for MSR 0x1A4 (miscellaneous features)
+#define MSR_1325_INDEX (5)  // Index for MSR 0x1325
+#define MSR_1326_INDEX (6)  // Index for MSR 0x1326
+#define MSR_1327_INDEX (7)  // Index for MSR 0x1327
+#define MSR_1A4_INDEX (8)   // Index for MSR 0x1A4 (miscellaneous features)
 
 // MSR register addresses for PMU configuration
 #define MSR_IA32_PERFEVTSEL0        0x186
@@ -53,8 +55,8 @@ typedef struct {
 #define PMU_ENTRY_SIZE_BYTES sizeof(dpf_pmu_log_entry_t)
 
 // Event types for PMU configuration (64-bit event codes including config bits)
-#define EVENT_CPU_CLK_UNHALTED_THREAD       (0x00000000004300c0ULL) // Event 0x00, UMask 0xc0, Enable
-#define EVENT_INST_RETIRED_ANY_P            (0x00000000004300c2ULL) // Event 0x00, UMask 0xc2, Enable
+#define EVENT_CPU_CLK_UNHALTED_THREAD       (0x000000000043003cULL) // Event 0x03, UMask 0x3c, Enable
+#define EVENT_INST_RETIRED_ANY_P            (0x00000000004300c0ULL) // Event 0x00, UMask 0xc0, Enable
 #define EVENT_MEM_UOPS_RETIRED_ALL_LOADS    (0x00000000004381d0ULL) // Event 0x81, UMask 0xd0, Enable
 #define EVENT_MEM_LOAD_UOPS_RETIRED_L2_HIT  (0x0000000000430224ULL) // Event 0x24, UMask 0x02, L2-hit
 #define EVENT_MEM_LOAD_UOPS_RETIRED_L2_MISS (0x0000000000430124ULL) // Event 0x24, UMask 0x01, L2-miss
@@ -125,6 +127,12 @@ struct dpf_resp_pmu_log_stop_s;
 struct dpf_pmu_log_read_s;
 struct dpf_resp_pmu_log_read_s;
 
+// Shadow of the last value written to each prefetch MSR, per core.
+struct msr_shadow_s {
+    uint64_t value;
+    int valid;
+};
+
 // Core state structure
 struct core_state_s {
     uint64_t pmu_raw[PMU_COUNTERS]; 	// Raw value from last PMU read (mapped to pmu_metrics)
@@ -132,6 +140,8 @@ struct core_state_s {
     union msr_u pf_msr[NR_OF_MSR];	// MSR values (0x1320...0x1A4)
     int pf_msr_dirty;			// 0 = no update needed, 1 = update needed
     int core_disabled;			// 1 = core disabled, 0 = enabled
+    uint64_t msr_written;		// # of prefetch MSR writes performed
+    uint64_t msr_skipped;		// # of prefetch MSR writes skipped 
 };
 
 extern int sys_first_core;

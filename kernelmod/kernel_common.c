@@ -11,6 +11,35 @@ int sys_active_cores = 0; //set by core_range API
 struct core_state_s corestate[MAX_NUM_CORES];
 int ddr_bw_target;
 
+static struct msr_shadow_s msr_shadow[MAX_NUM_CORES][NR_OF_MSR];
+
+// Write one prefetch MSR unless the new value is identical to the last value
+// written for this core/MSR (tracked by the shadow). Returns 1 if a wrmsr was
+// actually performed, 0 if it was skipped as unchanged.
+// Example call:
+//   msr_shadow_write(core_id, MSR_1321_INDEX, 0x1321);
+static int msr_shadow_write(int core_id, int msr_index, unsigned int msr_addr)
+{
+	u64 value;
+
+	value = corestate[core_id].pf_msr[msr_index].v;
+
+	if (msr_shadow[core_id][msr_index].valid &&
+	    msr_shadow[core_id][msr_index].value == value) {
+		corestate[core_id].msr_skipped++;
+		return 0;
+	}
+
+	__wrmsr(msr_addr, (u32)value, (u32)(value >> 32));
+
+	// Record the new value in the shadow
+	msr_shadow[core_id][msr_index].value = value;
+	msr_shadow[core_id][msr_index].valid = 1;
+
+	corestate[core_id].msr_written++;
+
+	return 1;
+}
 
 //update the pmu field in the corestate struct for the given core.
 // IMPORTANT: This has to be the core with core_id that calls this function or incorrect state will be updated
@@ -60,8 +89,17 @@ int msr_load(int core_id)
 	corestate[core_id].pf_msr[MSR_1322_INDEX].v = __rdmsr(0x1322);
 	corestate[core_id].pf_msr[MSR_1323_INDEX].v = __rdmsr(0x1323);
 	corestate[core_id].pf_msr[MSR_1324_INDEX].v = __rdmsr(0x1324);
+	corestate[core_id].pf_msr[MSR_1325_INDEX].v = __rdmsr(0x1325);
+	corestate[core_id].pf_msr[MSR_1326_INDEX].v = __rdmsr(0x1326);
 	corestate[core_id].pf_msr[MSR_1327_INDEX].v = __rdmsr(0x1327);
 	corestate[core_id].pf_msr[MSR_1A4_INDEX].v = __rdmsr(0x1a4);
+
+	// Sync the shadow to the values actually in hardware so that a later
+	// msr_update() with the same value is correctly skipped.
+	for (int i = 0; i < NR_OF_MSR; i++) {
+		msr_shadow[core_id][i].value = corestate[core_id].pf_msr[i].v;
+		msr_shadow[core_id][i].valid = 1;
+	}
 
 	return 0;
 }
@@ -72,13 +110,17 @@ int msr_update(int core_id)
 {
 	corestate[core_id].pf_msr_dirty = 0; //reset msr state
 
-	__wrmsr(0x1320, (u32)corestate[core_id].pf_msr[MSR_1320_INDEX].v, (u32) (corestate[core_id].pf_msr[MSR_1320_INDEX].v >> 32));
-	__wrmsr(0x1321, (u32)corestate[core_id].pf_msr[MSR_1321_INDEX].v, (u32) (corestate[core_id].pf_msr[MSR_1321_INDEX].v >> 32));
-	__wrmsr(0x1322, (u32)corestate[core_id].pf_msr[MSR_1322_INDEX].v, (u32) (corestate[core_id].pf_msr[MSR_1322_INDEX].v >> 32));
-	__wrmsr(0x1323, (u32)corestate[core_id].pf_msr[MSR_1323_INDEX].v, (u32) (corestate[core_id].pf_msr[MSR_1323_INDEX].v >> 32));
-	__wrmsr(0x1324, (u32)corestate[core_id].pf_msr[MSR_1324_INDEX].v, (u32) (corestate[core_id].pf_msr[MSR_1324_INDEX].v >> 32));
-	__wrmsr(0x1327, (u32)corestate[core_id].pf_msr[MSR_1327_INDEX].v, (u32) (corestate[core_id].pf_msr[MSR_1327_INDEX].v >> 32));
-	__wrmsr(0x1a4, (u32)corestate[core_id].pf_msr[MSR_1A4_INDEX].v, (u32) (corestate[core_id].pf_msr[MSR_1A4_INDEX].v >> 32));
+	// Each prefetch MSR is written only if its value changed since the last
+	// write
+	msr_shadow_write(core_id, MSR_1320_INDEX, 0x1320);
+	msr_shadow_write(core_id, MSR_1321_INDEX, 0x1321);
+	msr_shadow_write(core_id, MSR_1322_INDEX, 0x1322);
+	msr_shadow_write(core_id, MSR_1323_INDEX, 0x1323);
+	msr_shadow_write(core_id, MSR_1324_INDEX, 0x1324);
+	msr_shadow_write(core_id, MSR_1325_INDEX, 0x1325);
+	msr_shadow_write(core_id, MSR_1326_INDEX, 0x1326);
+	msr_shadow_write(core_id, MSR_1327_INDEX, 0x1327);
+	msr_shadow_write(core_id, MSR_1A4_INDEX, 0x1a4);
 
 	return 0;
 }
