@@ -8,19 +8,16 @@
 #include "kernel_mab.h"
 #include "kernel_primitive.h"
 
-#ifdef SIM
-// sim has no api_tuning(); aggressiveness is a compile-time constant.
-#define aggr (5)
-#else
-// Runtime aggressiveness parameter set by userspace via api_tuning().
-extern int aggr;
-#endif
+// Symmetric rotation policy tunable (score units). No aggressiveness boost, no
+// default-arm anchor, and no forced probing: an arm is only switched away from
+// when the other arm's stored score leads by ROTATE_HYST or more.
+#define ROTATE_HYST   (16)  /* switch arms when the other leads by >= this */
 
-// define persistent kernel MAB state.
-// Runtime logic wiring is intentionally deferred to later tasks.
-struct mab_core mab_cores[MAX_NUM_CORES];
-struct mab_module mab_modules[MAX_MODULES];
-struct mab_arm_config mab_arm_configs[MAX_ARMS];
+// Define persistent kernel MAB state.
+// FIX: use the _s-suffixed struct tags declared in kernel_mab.h.
+struct mab_core_s mab_cores[MAX_NUM_CORES];
+struct mab_module_s mab_modules[MAX_MODULES];
+struct mab_arm_config_s mab_arm_configs[MAX_ARMS];
 
 // Returns the first non-disabled core in a module, regardless of idle state.
 // Used to assign responsibility for module-level idle tracking.
@@ -32,14 +29,14 @@ int mab_first_enabled_core(int module_idx)
 
 	module_start = sys_first_core + module_idx * CORES_PER_COMPUTE_MODULE;
 
-	for (i = module_start; i < module_start + CORES_PER_COMPUTE_MODULE; i
-		++) {
+	for (i = module_start; i < module_start + CORES_PER_COMPUTE_MODULE; i++) {
 		if (!corestate[i].core_disabled)
 			return i;
 	}
 
 	return -1;
 }
+
 
 // Returns the index of the first active, non-disabled core in a module.
 // Returns -1 if all cores in the module are idle or disabled.
@@ -50,14 +47,8 @@ int mab_first_active_core(int module_idx)
 
 	module_start = sys_first_core + module_idx * CORES_PER_COMPUTE_MODULE;
 
-	for (i = module_start; i < module_start + CORES_PER_COMPUTE_MODULE; i
-		++) {
-		if (corestate[i].core_disabled || mab_cores[i].idle_counter >
-			0) {
-			// pr_info("MAB first_active: skipping core %d
-			// (disabled=%d idle=%d)\n",
-			// 	 i, corestate[i].core_disabled, mab_cores[i].
-			// idle_counter);
+	for (i = module_start; i < module_start + CORES_PER_COMPUTE_MODULE; i++) {
+		if (corestate[i].core_disabled || mab_cores[i].idle_counter > 0) {
 			continue;
 		}
 		return i;
@@ -108,13 +99,12 @@ static __u32 mab_module_score(int module_idx, int arm_id)
 
 // Apply one arm's MSR configuration to the selected core.
 // Returns 0 on success, -EINVAL if arm_id is out of bounds.
-static int mab_apply_msr_config(int core_id, int arm_id)
+// FIX: removed `static` to match the non-static declaration in kernel_mab.h.
+int mab_apply_msr_config(int core_id, int arm_id)
 {
 	int i;
 
 	if (arm_id < 0 || arm_id >= MAX_ARMS) {
-		pr_err("MAB: invalid arm_id %d in mab_apply_msr_config\n",
-		       arm_id);
 		return -EINVAL;
 	}
 
@@ -143,29 +133,25 @@ static __u32 mab_compute_score(int core_id)
 	// Kernel_mab.h defines MAB_SCORE_MODE to select the scoring mode at compile time.
 #if MAB_SCORE_MODE == MAB_SCORE_IPC
 	{
-		__u64 a_scaled = event_a >> SHIFT_A;
-		__u64 b_scaled = event_b >> SHIFT_B;
+		__u64 a_scaled = event_a >> SHIFT_A;		// instructions
+		__u64 b_scaled = event_b >> SHIFT_B;	// cycles (denominator)
 
 		if (b_scaled == 0)
 			return 0;
-		
-		pr_info("MAB score core %d [IPC]: instr=%llu cyc=%llu a_sc=%llu b_sc=%llu score=%u\n",
-			core_id, event_a, event_b, a_scaled, b_scaled,
-			(__u32)(a_scaled / b_scaled));
 
 		return (__u32)(a_scaled / b_scaled);
 	}
 #elif MAB_SCORE_MODE == MAB_SCORE_LOADHEAD
 	{
 		__u64 a_b_scaled;
-		__u64 b_scaled = event_b >> SHIFT_B;
-		
+		__u64 b_scaled = event_b >> SHIFT_C;	// cycles (denominator)
+
 		if (b_scaled == 0)
 			return 0;
-		
+
 		if (event_a >= event_b)				// stalled on loads the whole interval
 			return 0;
-		a_b_scaled = (event_b - event_a);
+		a_b_scaled = (event_b - event_a);	// cycles not stalled on loads
 
 		pr_info("MAB score core %d [LDHEAD]: ldhead=%llu cyc=%llu a_b_sc=%llu b_sc=%llu score=%u\n",
 			core_id, event_a, event_b, a_b_scaled, b_scaled,
@@ -222,7 +208,7 @@ void mab_setup_default_arms(void)
 	mab_arm_configs[0].pf_msr[MSR_1324_INDEX].v = 0x0600000000000000ULL;
 	mab_arm_configs[0].pf_msr[MSR_1327_INDEX].v = 0x0000000005920014ULL;
 
-	// arm 1: aggressive prefetcher config
+	// arm 1: All enabled prefetcher config
 	mab_arm_configs[1].pf_msr[MSR_1A4_INDEX].v = 0x00ULL;
 	mab_arm_configs[1].pf_msr[MSR_1320_INDEX].v = 0x108837ea070906c4ULL;
 	mab_arm_configs[1].pf_msr[MSR_1321_INDEX].v = 0x241134140001ULL;
@@ -230,162 +216,82 @@ void mab_setup_default_arms(void)
 	mab_arm_configs[1].pf_msr[MSR_1323_INDEX].v = 0x1f9cc00000000ULL;
 	mab_arm_configs[1].pf_msr[MSR_1324_INDEX].v = 0x600000000000000ULL;
 	mab_arm_configs[1].pf_msr[MSR_1327_INDEX].v = 0x5920014ULL;
-
-	pr_info("MAB: default arm configs loaded (arm0=boot_default, arm1=aggressive)\n");
 }
 
-
-
-// Main MAB algorithm for initialized cores.
-// All cores update their own per-core arm scores each tick.
-// Only the module leader aggregates scores and makes arm selection for the
-// whole module.
-// Returns 0 on success.
-// Main MAB algorithm for initialized cores.
-// All cores update their own per-core arm scores each tick.
-// Only the module leader aggregates scores and makes arm selection for the
-// whole module.
+// Main MAB algorithm for initialized modules.
+// Active cores record scores; active and idle cores report completion.
+// The last core to finish in the module aggregates scores and may update MSRs.
 // Returns 0 on success.
 int mab_tuning(int core_id)
 {
-	__u32 score;
 	int i;
+	int module_core;
 	int best_arm;
 	int module_idx;
-	struct mab_module* mod;
+	struct mab_module_s *mod;   // FIX: use _s tag
+	int active_arm;
+	int enabled_cores = 0;
+	__u32 score = 0;
 	__u32 scores[AVAILABLE_ARMS];
-	int passive_arm;
 
 	module_idx = module_id(core_id);
 	mod = &mab_modules[module_idx];
-	int active_arm = mod->active_arm;
+	active_arm = mod->active_arm;
 
-	// Determine passive arm (assuming 2 arms for now)
-	// This is only used for logging purposes
-	passive_arm = (active_arm == 0) ? 1 : 0;
-
-	// Compute the active arm score for this core and update its per-core state.
-	score = mab_compute_score(core_id);
-	mab_cores[core_id].arms[active_arm].last_score =
-		mab_cores[core_id].arms[active_arm].score;
-	mab_cores[core_id].arms[active_arm].score = score;
-
-	// Print in the old detailed style (before applying the boost)
-	pr_info("MAB tuning core %d: active=ARM%d score=%u (raw, aggr NOT added) | "
-		"passive=ARM%d last=%u + aggr=%u = %u\n",
-		core_id,
-		active_arm, mab_cores[core_id].arms[active_arm].score,
-		passive_arm,
-		mab_cores[core_id].arms[passive_arm].score,
-		mod->arm_aggressiveness[passive_arm],
-		mab_cores[core_id].arms[passive_arm].score +
-		mod->arm_aggressiveness[passive_arm]);
-
-	// Add aggressiveness to passive arms (all except active)
-	for (i = 0; i < AVAILABLE_ARMS; i++) {
-		if (i != active_arm) {
-			mab_cores[core_id].arms[i].score += mod->arm_aggressiveness[i];
-		}
+	// Idle cores still report completion, but do not contribute a new score.
+	if (mab_cores[core_id].idle_counter == 0) {
+		score = mab_compute_score(core_id);
+		mab_cores[core_id].arms[active_arm].last_score =
+			mab_cores[core_id].arms[active_arm].score;
+		mab_cores[core_id].arms[active_arm].score = score;
 	}
 
-	// Non-leaders return here since arm selection is at module scope
-	if (core_id != mab_first_active_core(module_idx))
+	// Count enabled cores in this module for the completion target.
+	// FIX: removed `enabled_cores = mod->enabled_cores;` (now cached in mod
+	// after first count; re-count only if not yet set).
+	if (mod->enabled_cores == 0) {
+		for (module_core = sys_first_core + module_idx * CORES_PER_COMPUTE_MODULE;
+		     module_core < sys_first_core +
+				(module_idx + 1) * CORES_PER_COMPUTE_MODULE;
+		     module_core++) {
+			if (!corestate[module_core].core_disabled)
+				mod->enabled_cores++;
+		}
+	}
+	enabled_cores = mod->enabled_cores;
+
+	// Atomically announce completion for this core.
+	if (atomic_inc_return(&mod->cores_done) < enabled_cores) {
+		if (mab_cores[core_id].idle_counter > 0)
+			pr_info("Core %d -> idle -> reported\n", core_id);
+		else
+			pr_info("Core %d -> score %u -> reported\n", core_id, score);
 		return 0;
-
-	// Calculate aggregate scores and find best arm
-	best_arm = active_arm;
-	for (i = 0; i < AVAILABLE_ARMS; i++) {
-		scores[i] = mab_module_score(module_idx, i);
-		if (scores[i] > scores[best_arm])
-			best_arm = i;
 	}
 
-	// Track how long active arm has been running (for penalty logic)
-	mod->arm_consecutive_runs[active_arm]++;
+	// Last core arrived: aggregate module scores and select the arm.
+	pr_info("Core %d -> all module cores reported -> aggregate\n", core_id);
 
-	pr_info("MAB mod %d DECISION: active=%d score=%u best=%d score=%u\n",
-		module_idx, active_arm, scores[active_arm],
-		best_arm, scores[best_arm]);
+	for (i = 0; i < AVAILABLE_ARMS; i++)
+		scores[i] = mab_module_score(module_idx, i);
 
-	// If passive arm wins
+	best_arm = active_arm;
+
+	if (scores[1 - active_arm] - scores[active_arm] >= ROTATE_HYST)
+		best_arm = 1 - active_arm;
+
+	pr_info("MAB decision [mod %d by core %d]: arm0=%u arm1=%u -> chosen=%d (active=%d)\n",
+		module_idx, core_id, scores[0], scores[1], best_arm, active_arm);
+
 	if (best_arm != active_arm) {
-		pr_info("MAB mod %d: challenger ARM%d won, swapping immediately\n",
-			module_idx, best_arm);
-
-		// Apply penalty based on how long active arm ran
-		if (mod->arm_consecutive_runs[active_arm] == 1) {
-			// Ran only 1 interval -> penalize
-			__u32 old_aggr = mod->arm_aggressiveness[active_arm];
-
-			int penalty = aggr / AGGR_REDUCTION_FACTOR;
-			// if (penalty < 1)
-			// 	penalty = 1;
-
-			if (mod->arm_aggressiveness[active_arm] > penalty)
-				mod->arm_aggressiveness[active_arm] -= penalty;
-			else
-				mod->arm_aggressiveness[active_arm] = MIN_AGGRESSIVENESS;
-
-			pr_info("MAB mod %d PENALISED: ARM%d ran 1 interval -> aggr %u -> %u (penalty=%d)\n",
-				module_idx, active_arm, old_aggr,
-				mod->arm_aggressiveness[active_arm], penalty);
-		} else {
-			// Ran 2+ intervals -> reset to default
-			__u32 old_aggr = mod->arm_aggressiveness[active_arm];
-			mod->arm_aggressiveness[active_arm] = aggr;
-
-			pr_info("MAB mod %d RESET: ARM%d ran %u intervals -> aggr %u -> %d\n",
-				module_idx, active_arm,
-				mod->arm_consecutive_runs[active_arm],
-				old_aggr, mod->arm_aggressiveness[active_arm]);
-		}
-
-		// Reset all counters (preparing for swap)
-		for (i = 0; i < AVAILABLE_ARMS; i++) {
-			mod->arm_consecutive_wins[i] = 0;
-			mod->arm_consecutive_runs[i] = 0;
-		}
-
-		// Perform swap
 		mod->active_arm = best_arm;
 		mab_apply_msr_config(core_id, best_arm);
-
-		// Track new active arm
-		mod->arm_consecutive_wins[best_arm] = 1;
-
-		pr_info("MAB mod %d SWAP: %d -> %d (active=ARM%d aggr=%d, passive=ARM%d aggr=%d)\n",
-			module_idx, active_arm, best_arm,
-			best_arm, mod->arm_aggressiveness[best_arm],
-			active_arm, mod->arm_aggressiveness[active_arm]);
-
-	} else {
-		// Active arm keeps winning this interval
-		mod->arm_consecutive_wins[active_arm]++;
-
-		// Only trigger RESTORE if aggr is not already default
-		if (mod->arm_consecutive_wins[active_arm] >= 2 &&
-		    mod->arm_aggressiveness[active_arm] != aggr) {
-
-			__u32 old_aggr = mod->arm_aggressiveness[active_arm];
-			mod->arm_aggressiveness[active_arm] = aggr;
-
-			pr_info("MAB mod %d RESTORE: ARM%d won 2x consecutively -> aggr %u -> %d\n",
-				module_idx, active_arm, old_aggr,
-				mod->arm_aggressiveness[active_arm]);
-
-			// Reset wins counter to prevent repeated checks
-			mod->arm_consecutive_wins[active_arm] = 0;
-		}
-
-		// Reset win counter for all passive arms
-		for (i = 0; i < AVAILABLE_ARMS; i++) {
-			if (i != active_arm && mod->arm_consecutive_wins[i] > 0)
-				mod->arm_consecutive_wins[i] = 0;
-		}
-
-		pr_info("MAB mod %d KEEP: ARM%d active wins\n",
-			module_idx, active_arm);
+		pr_info("MAB switch [mod %d by core %d]: switched ARM %d -> %d, MSRs updated\n",
+			module_idx, core_id, active_arm, best_arm);
 	}
+
+	// FIX: reset completion counter for next aggregation round.
+	atomic_set(&mod->cores_done, 0);
 
 	return 0;
 }
@@ -400,12 +306,13 @@ int mab_init_module_step(int core_id)
 	int i;
 	int best_arm;
 	int module_idx;
-	struct mab_module* mod;
+	struct mab_module_s *mod;   // FIX: use _s tag
 	__u32 score;
+	int module_start;
 
 	module_idx = module_id(core_id);
 	mod = &mab_modules[module_idx];
-	int module_start = sys_first_core + module_idx * CORES_PER_COMPUTE_MODULE;
+	module_start = sys_first_core + module_idx * CORES_PER_COMPUTE_MODULE;
 
 	// First apply arm 0 to all cores in the module and begin scanning.
 	if (mod->initialized == MAB_INIT_NOT_STARTED) {
@@ -437,9 +344,6 @@ int mab_init_module_step(int core_id)
 	score = mab_module_score(module_idx, mod->active_arm);
 	mab_cores[core_id].arms[mod->active_arm].score = score;
 
-	pr_info("MAB init_step mod %d leader %d state %d active_arm %d score %u\n",
-		module_idx, core_id, mod->initialized, mod->active_arm, score);
-
 	// Advance to next arm if more remain to be tested.
 	if (mod->active_arm + 1 < AVAILABLE_ARMS) {
 		mod->active_arm++;
@@ -455,28 +359,6 @@ int mab_init_module_step(int core_id)
 	for (i = 1; i < AVAILABLE_ARMS; i++) {
 		if (mab_cores[core_id].arms[i].score > mab_cores[core_id].arms[best_arm].score)
 			best_arm = i;
-	}
-
-	pr_info("MAB module %d init done: best arm %d\n", module_idx, best_arm);
-
-	// Initialize all cores' arm scores with module-level scores
-	for (i = module_start; i < module_start + CORES_PER_COMPUTE_MODULE; i++) {
-		if (corestate[i].core_disabled || mab_cores[i].idle_counter > 0)
-			continue;
-
-		int arm;
-		for (arm = 0; arm < AVAILABLE_ARMS; arm++) {
-			__u32 arm_module_score = mab_module_score(module_idx, arm);
-			mab_cores[i].arms[arm].score = arm_module_score;
-			mab_cores[i].arms[arm].last_score = arm_module_score;
-		}
-	}
-
-	// Initialize per-arm aggressiveness and consecutive run counters
-	for (i = 0; i < AVAILABLE_ARMS; i++) {
-		mod->arm_aggressiveness[i] = aggr;
-		mod->arm_consecutive_runs[i] = 0;
-		mod->arm_consecutive_wins[i] = 0;
 	}
 
 	mod->active_arm = best_arm;

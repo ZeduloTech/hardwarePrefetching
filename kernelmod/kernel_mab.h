@@ -5,6 +5,7 @@
 #include "sim.h"
 #else
 #include <linux/types.h>
+#include <linux/atomic.h>
 
 #include "kernel_common.h"
 #include "kernel_primitive.h"
@@ -18,18 +19,18 @@
 
 // Active-arm scoring metric. Change MAB_SCORE_MODE to pick one; it applies to
 // both the kernel module and the -DSIM offline sim (both include this header).
-// Values matter: the mode is selected with `#if MAB_SCORE_MODE == ...`.
-#define MAB_SCORE_IPC      (0)
-#define MAB_SCORE_LOADHEAD (1)
+#define MAB_SCORE_IPC      (0)  // score: (instructions        >> SHIFT_A) / (cycles >> SHIFT_B)
+#define MAB_SCORE_LOADHEAD (1)  // score: ((cycles - loadhead) >> SHIFT_A) / (cycles >> SHIFT_C)
 
 #ifndef MAB_SCORE_MODE
-#define MAB_SCORE_MODE MAB_SCORE_IPC
+#define MAB_SCORE_MODE MAB_SCORE_LOADHEAD
 #endif
 
 // Right-shifts applied before dividing; SHIFT_B sets the score scale.
 // Change freely: SHIFT_B=10 -> ~*1000, 12 -> ~*4096, 14 -> ~*16384.
 #define SHIFT_A (0)
 #define SHIFT_B (10)
+#define SHIFT_C (12)
 
 #define SCORE_EVENT_B PERF_CPU_CLK_UNHALTED_THREAD
 
@@ -38,9 +39,6 @@
 #elif MAB_SCORE_MODE == MAB_SCORE_LOADHEAD
 #define SCORE_EVENT_A PERF_LD_HEAD_ANY_AT_RET
 #endif
-
-#define MIN_AGGRESSIVENESS (1)
-#define AGGR_REDUCTION_FACTOR (4)  // Penalty = aggr / 4
 
 // Number of consecutive idle intervals before core MAB state is reset.
 #define IDLE_THRESHOLD (5)
@@ -54,40 +52,44 @@
 #define MAB_INIT_DONE        (1)
 
 // MAB arm state for reward calculation.
-struct mab_arm {
+struct mab_arm_s {
 	__u32 score;
 	__u32 last_score;
 };
 
 // One arm maps to one MSR configuration.
-struct mab_arm_config {
+struct mab_arm_config_s {
 	union msr_u pf_msr[NR_OF_MSR];
 };
 
 // Per-core MAB state
-struct mab_core {
-	struct mab_arm arms[MAX_ARMS];
+struct mab_core_s {
+	struct mab_arm_s arms[MAX_ARMS];
+	__u64 time_old;  // timestamp of last tick, used to compute time delta
 	int active_arm;
 	int initialized; // MAB initialization state
 	int idle_counter;
-	__u64 time_old;  // timestamp of last tick, used to compute time delta
-};
+} __attribute__((__aligned__(64)));
 
 // Per-module MAB state: one entry per compute module.
 // Arm selection and init scanning are driven at module scope by the module leader.
-struct mab_module {
-	int active_arm;   // arm currently applied to all cores in this module
-	int initialized;  // uses MAB_INIT_NOT_STARTED / IN_PROGRESS / DONE
-	int idle_counter; // consecutive idle ticks before module state is reset
-	__u32 arm_aggressiveness[MAX_ARMS]; // per-arm exploration boost
-	__u32 arm_consecutive_runs[MAX_ARMS]; // consecutive intervals running
-	__u32 arm_consecutive_wins[MAX_ARMS]; // consecutive wins for restore
-};
+struct mab_module_s {
+	int active_arm;
+	int initialized;
+	int idle_counter;
+	int in_transition;
+	int enabled_cores;
+	atomic_t cores_done __attribute__((aligned(64)));
+	__u64 arm_selection_count[MAX_ARMS] __attribute__((aligned(64)));
+	__u64 switch_count;
+} __attribute__((__aligned__(64)));
+
+
 
 // Declare the global MAB state arrays for cores, modules, and arm configurations.
-extern struct mab_core mab_cores[MAX_NUM_CORES];
-extern struct mab_module mab_modules[MAX_MODULES];
-extern struct mab_arm_config mab_arm_configs[MAX_ARMS];
+extern struct mab_core_s mab_cores[MAX_NUM_CORES];
+extern struct mab_module_s mab_modules[MAX_MODULES];
+extern struct mab_arm_config_s mab_arm_configs[MAX_ARMS];
 
 // Returns 1 if core is active, 0 if idle, -1 on error or first call.
 // Updates mab_cores[core_id].time_old on each call.
@@ -117,5 +119,16 @@ int mab_first_active_core(int module_idx);
 
 // Placeholder declaration for module-level init step (implemented in Task C).
 int mab_init_module_step(int core_id);
+
+// Dumps per-module MAB statistics (arm selection counts and switch count) to
+// dmesg and resets the counters. Called when a module first enters the idle
+// state (all 4 cores idle).
+void mab_dump_module_stats(int module_idx);
+
+// Applies one arm's MSR configuration to the selected core's pf_msr table and sets dirty.
+int mab_apply_msr_config(int core_id, int arm_id);
+
+// Synchronously broadcasts arm MSR configuration to all cores in the module.
+void mab_broadcast_module_arm(int module_idx, int new_arm);
 
 #endif // __KERNEL_MAB_H__

@@ -347,6 +347,14 @@ static void per_core_work(void *info)
 			// pr_debug("MAB core %d idle (counter=%d)\n", core_id,
 			//	mab_cores[core_id].idle_counter);
 
+			if (mab_modules[module_id(core_id)].initialized == MAB_INIT_DONE) {
+				int ret = mab_tuning(core_id);
+
+				if (ret < 0)
+					pr_err("MAB idle completion failed for core %d\n",
+					       core_id);
+			}
+
 
 		} else if (active == 1) {	// core is active
 
@@ -394,6 +402,8 @@ static void per_core_work(void *info)
 // This runs in a kworker thread, satisfying in_task() requirement
 static void monitor_work_func(struct work_struct *work)
 {
+	int module_idx;
+
 	// Verify we're in task context (diagnostic)
 	if (in_interrupt()) {
 		pr_err("BUG: monitor_work_func running in interrupt context!\n");
@@ -404,6 +414,10 @@ static void monitor_work_func(struct work_struct *work)
 		return;
 
 	if (!cpumask_empty(&enabled_cpus)) {
+		// Start a fresh completion count for each monitor tick.
+		for (module_idx = 0; module_idx < MAX_MODULES; module_idx++)
+			atomic_set(&mab_modules[module_idx].cores_done, 0);
+
 		// Execute work on local CPU first
 		per_core_work(NULL);
 
@@ -464,8 +478,10 @@ static int __init dpf_module_init(void)
 		mab_cores[core_id].initialized = MAB_INIT_NOT_STARTED;
 
 	// Mark all modules as not started.
-	for (module_idx = 0; module_idx < MAX_MODULES; module_idx++)
+	for (module_idx = 0; module_idx < MAX_MODULES; module_idx++) {
 		mab_modules[module_idx].initialized = MAB_INIT_NOT_STARTED;
+		atomic_set(&mab_modules[module_idx].cores_done, 0);
+	}
 
 	kt_period = ktime_set(TIMER_INTERVAL_SEC, 0);
 	hrtimer_init(&monitor_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
