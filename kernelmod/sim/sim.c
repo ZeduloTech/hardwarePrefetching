@@ -4,10 +4,20 @@
 
 //#define GCC_250_1C
 //#define GCC_1000_1C
-#define XALANC_250_1C
+//#define XALANC_250_1C
 //#define XALANC_1000_1C
 //#define OMNET_250_1C
 //#define OMNET_1000_1C
+//#define core4a_gcc1000_h
+//#define core4b_gcc1000_h
+//#define core4c_gcc1000_h
+//#define core4d_gcc1000_h
+#define core4a_xalanc1000_h
+//#define core4b_xalanc1000_h
+//#define core4c_xalanc1000_h
+//#define core4d_xalanc1000_h
+//define core1a_gcc1000_h
+//#define core1a_xalanc1000_h
 
 #include "data/1c_xalanc250.h"
 #include "data/1c_xalanc1000.h"
@@ -15,7 +25,16 @@
 #include "data/1c_gcc1000.h"
 #include "data/1c_omnet250.h"
 #include "data/1c_omnet1000.h"
-
+#include "data/core4a_gcc1000.h"
+#include "data/core4b_gcc1000.h"
+#include "data/core4c_gcc1000.h"
+#include "data/core4d_gcc1000.h"
+#include "data/core4a_xalanc1000.h"
+#include "data/core4b_xalanc1000.h"
+#include "data/core4c_xalanc1000.h"
+#include "data/core4d_xalanc1000.h"
+#include "data/core1a_gcc1000.h"
+#include "data/core1a_xalanc1000.h"
 
 
 #if MAB_SCORE_MODE == MAB_SCORE_IPC

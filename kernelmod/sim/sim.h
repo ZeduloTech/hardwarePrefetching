@@ -10,6 +10,10 @@
 
 __u64 ktime_get_ns(void);
 
+typedef int atomic_t;
+#define atomic_inc_return(v) (++(*(v)))
+#define atomic_set(v, i)     (*(v) = (i))
+
 #include "kernel_common.h"
 #include "kernel_primitive.h"
 
