@@ -334,25 +334,37 @@ static void per_core_work(void *info)
 					mab_modules[module_id(core_id)]
 						.idle_counter++;
 
-				if (mab_modules[module_id(core_id)].
-					idle_counter > IDLE_THRESHOLD) {
-					mab_modules[module_id(core_id)].
-					initialized = MAB_INIT_NOT_STARTED;
-					// pr_debug("MAB mod %d idle threshold
-					// hit, resetting init state\n",
-					// module_id(core_id));
-				}
+					if (mab_modules[module_id(core_id)]
+					.idle_counter > IDLE_THRESHOLD &&
+					mab_modules[module_id(core_id)]
+					.initialized == MAB_INIT_DONE) {
+						// Dump MAB statistics once 
+                                                //when the module first goes
+                                                // idle, then reset for the next
+						// active period.
+						mab_dump_module_stats(
+                                                        module_id(core_id));
+
+						mab_modules[module_id(core_id)]
+                                                .initialized =
+                                                MAB_INIT_NOT_STARTED;
+						// pr_debug("MAB mod %d idle 
+                                                //threshold
+						// hit, resetting init state\n",
+						// module_id(core_id));
+					}
 			}
 
 			// pr_debug("MAB core %d idle (counter=%d)\n", core_id,
 			//	mab_cores[core_id].idle_counter);
 
-			if (mab_modules[module_id(core_id)].initialized == MAB_INIT_DONE) {
+			if (mab_modules[module_id(core_id)].initialized == 
+                        MAB_INIT_DONE) {
 				int ret = mab_tuning(core_id);
 
 				if (ret < 0)
-					pr_err("MAB idle completion failed for core %d\n",
-					       core_id);
+					pr_err("MAB idle completion failed for "
+                                                "core %d\n", core_id);
 			}
 
 
@@ -372,6 +384,7 @@ static void per_core_work(void *info)
 
 			if (mab_modules[module_id(core_id)]
 			.initialized == MAB_INIT_DONE) {
+                                
 
 				int ret = mab_tuning(core_id);
 

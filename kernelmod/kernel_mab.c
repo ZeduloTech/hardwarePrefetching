@@ -283,8 +283,13 @@ int mab_tuning(int core_id)
 	pr_info("MAB decision [mod %d by core %d]: arm0=%u arm1=%u -> chosen=%d (active=%d)\n",
 		module_idx, core_id, scores[0], scores[1], best_arm, active_arm);
 
+	// Count this aggregation round as one selection of the chosen arm.
+	if (best_arm >= 0 && best_arm < AVAILABLE_ARMS)
+		mod->arm_selection_count[best_arm]++;
+
 	if (best_arm != active_arm) {
 		mod->active_arm = best_arm;
+		mod->switch_count++;
 		mab_apply_msr_config(core_id, best_arm);
 		pr_info("MAB switch [mod %d by core %d]: switched ARM %d -> %d, MSRs updated\n",
 			module_idx, core_id, active_arm, best_arm);
@@ -362,9 +367,38 @@ int mab_init_module_step(int core_id)
 	}
 
 	mod->active_arm = best_arm;
+	if (best_arm >= 0 && best_arm < AVAILABLE_ARMS)
+		mod->arm_selection_count[best_arm]++;
 	mab_apply_msr_config(core_id, best_arm);
 
 	mod->initialized = MAB_INIT_DONE;
 
 	return 0;
+}
+
+
+// Dump per-module MAB statistics to dmesg and reset the counters.
+// Called when a module first enters the idle state (all 4 cores idle), so the
+// per-tick path stays quiet and the statistics reflect one full active period.
+void mab_dump_module_stats(int module_idx)
+{
+	int i;
+
+	if (module_idx < 0 || module_idx >= MAX_MODULES)
+		return;
+
+
+        pr_info("MAB STATS mod %d: switch_count=%llu active_arm=%d arm_selection_count[active_arm]=%llu\n",
+		module_idx, mab_modules[module_idx].switch_count, mab_modules[module_idx].active_arm,
+		mab_modules[module_idx].arm_selection_count[mab_modules[module_idx].active_arm]);
+
+	for (i = 0; i < AVAILABLE_ARMS; i++) {
+		pr_info("MAB STATS mod %d: arm%d selected=%llu times\n",
+			module_idx, i, mab_modules[module_idx].arm_selection_count[i]);
+	}
+
+	// Reset the per-episode statistics so the next active period is clean.
+	for (i = 0; i < AVAILABLE_ARMS; i++)
+		mab_modules[module_idx].arm_selection_count[i] = 0;
+	mab_modules[module_idx].switch_count = 0;
 }
